@@ -1,50 +1,51 @@
 import os
-import sqlite3
 from flask import Flask, jsonify
+import psycopg
 
 app = Flask(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "app.db")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "appdb")
+DB_USER = os.getenv("DB_USER", "appuser")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "apppassword")
 
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return psycopg.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+    )
 
 
 def init_db():
-    conn = get_connection()
-    cur = conn.cursor()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS notes (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL
+                )
+            """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL
-        )
-    """)
+            cur.execute("SELECT COUNT(*) FROM notes")
+            count = cur.fetchone()[0]
 
-    cur.execute("SELECT COUNT(*) as count FROM notes")
-    count = cur.fetchone()["count"]
+            if count == 0:
+                cur.execute(
+                    "INSERT INTO notes (title) VALUES (%s), (%s), (%s)",
+                    ("First note", "Second note", "Third note")
+                )
 
-    if count == 0:
-        cur.executemany(
-            "INSERT INTO notes (title) VALUES (?)",
-            [
-                ("First note",),
-                ("Second note",),
-                ("Third note",),
-            ]
-        )
-
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
 @app.route("/")
 def home():
-    return "Hello! Flask app with SQLite database is working."
+    return "Hello! Flask app with PostgreSQL database is working."
 
 
 @app.route("/health")
@@ -54,14 +55,13 @@ def health():
 
 @app.route("/notes")
 def get_notes():
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, title FROM notes ORDER BY id")
-    rows = cur.fetchall()
-    conn.close()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, title FROM notes ORDER BY id")
+            rows = cur.fetchall()
 
     return jsonify([
-        {"id": row["id"], "title": row["title"]}
+        {"id": row[0], "title": row[1]}
         for row in rows
     ])
 
